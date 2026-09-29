@@ -7,6 +7,21 @@ account → an honest exam that tells you whether any of it actually works.**
 You don't need to read the papers. Every idea borrowed from them is explained in plain
 words at the top of the file that uses it, and in the table below.
 
+## Example: a winning trade
+
+![A winning short on gold, 4 Oct 2016: sweep, change of character, order-block entry, +24.9R](docs/example_winning_trade.png)
+
+A short on real gold (M15), 4 October 2016, found by the bot with the current settings.
+- **Top row:** D1, H4 and H1 were all bearish at entry.
+- **Bottom left, the setup:** price swept a swing high, then a change of character closed
+  below the last swing low. The limit order sat at the order block (blue), with the fair
+  value gap (yellow) just below it.
+- **Bottom right, the trade:** the order filled and reached the 25R target in 60 bars
+  (15 hours), for +24.9R after costs.
+
+(Prices are in the data's units: 131,000 = $1,310.) This is one of the 12 setups on
+2012–2022 gold that reached 25R, so it's the best case, not the typical trade.
+
 ---
 
 ## The pipeline
