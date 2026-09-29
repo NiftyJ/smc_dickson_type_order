@@ -1,0 +1,121 @@
+
+==============================================================================
+1. DATA
+==============================================================================
+Source: GBPJPYm15.csv
+Bars: 230,400 from 2012-11-14 04:30:00 to 2022-03-04 23:45:00
+Cost per trade: 18.0 price units
+Top-down bias filter: OFF (biases recorded as features only)
+Lockbox (hidden unless --final): 2020-04-29 06:45:00 onwards
+
+==============================================================================
+2. SETUPS FOUND BY THE STATE MACHINE
+==============================================================================
+Setups: 3,890  (long 1,944, short 1,946)
+Limit orders that got filled: 63%
+Setups too close to the end of the data to grade (ignored): 0
+
+==============================================================================
+3. RAW RESULTS: EVERY FILLED SETUP, NO FILTER
+==============================================================================
+ target_R  filled_trades  win_rate  random_walk_win_rate  avg_R_per_trade
+        3           2455     0.251                 0.250           -0.104
+        5           2455     0.167                 0.167           -0.099
+       10           2455     0.095                 0.091           -0.037
+       20           2455     0.046                 0.048            0.013
+
+How to read this: 'random_walk_win_rate' is what ANY entry rule gets on a pure
+random walk with no time limit (1 in target+1). Winning more often than that,
+after costs, over hundreds of trades, is what an edge looks like.
+
+==============================================================================
+4. RULE REPORT (first part of history only)
+==============================================================================
+               rule  coverage  n_yes  n_no  win_if_yes  win_if_no  avgR_if_yes  avgR_if_no
+         htf_agrees     1.000    775   781       0.063      0.040        0.198      -0.066
+  entry_in_discount     1.000    997   559       0.047      0.058        0.031       0.128
+           is_choch     0.835   1299     0       0.048        NaN        0.037         NaN
+        left_an_fvg     1.000   1200   356       0.053      0.044        0.127      -0.140
+      ob_inside_fvg     0.381    593     0       0.047        NaN        0.096         NaN
+         deep_sweep     0.776   1207     0       0.052        NaN        0.103         NaN
+strong_displacement     0.454    640    67       0.040      0.036       -0.050      -0.295
+           killzone     0.418    650     0       0.042        NaN       -0.107         NaN
+        room_to_run     0.723    191   934       0.069      0.058        0.185       0.223
+     cheap_to_trade     0.592    865    56       0.045      0.049        0.081      -0.217
+
+Base 20R win rate in this period: 5.1%
+Setups where at least one rule says YES and another says NO: 96%
+A useful rule has win_if_yes clearly above win_if_no. Rules where they are about
+equal are doing nothing; delete them. Contradicting rules are fine here: the
+model decides how much each one is worth.
+
+==============================================================================
+5. WALK-FORWARD EXAM (5 test periods, model = gbm)
+==============================================================================
+All numbers below are OUT-OF-SAMPLE: each setup was judged by a model that
+had never seen its period. Unfilled orders count as 0R. Costs are included.
+
+  judge  orders  filled  wins  win_rate  avg_R  total_R  profit_factor  max_drawdown_R  worst_losing_streak  p_luck
+    all    3249    2046    93     0.045  0.001    2.709          1.001         292.449                   74   0.515
+  rules    1997    1210    50     0.041 -0.044  -88.533          0.929         205.656                   70   0.773
+  model    1368     891    46     0.052  0.045   61.063          1.066         149.430                   98   0.208
+placebo    1280     821    33     0.040 -0.099 -126.261          0.852         188.370                   68   0.788
+
+p_luck = chance of at least this many wins if the judge were no better than
+taking every setup. With 20R targets, luck is HUGE: a few lucky winners swing
+the total by 100R. Look at p_luck and the placebo row before believing total_R.
+
+Model, test period by test period:
+ fold  test_from    test_to  setups  taken  win_rate  avg_R  total_R
+    1 2014-02-19 2015-05-18     660    201     0.078  0.391   78.493
+    2 2015-05-19 2016-08-11     635    483     0.058  0.131   63.436
+    3 2016-08-11 2017-11-02     679    505     0.052  0.050   25.400
+    4 2017-11-03 2019-02-01     643     90     0.000 -0.791  -71.200
+    5 2019-02-01 2020-04-28     632     89     0.016 -0.394  -35.067
+
+Does the model RANK setups well? (no threshold involved)
+  model: top third minus bottom third = +0.16R per setup, p = 0.145
+judge        group  setups  win_rate  avg_R
+model bottom third    1085     0.040  0.023
+model middle third    1081     0.033 -0.206
+model    top third    1083     0.062  0.185
+  placebo: top third minus bottom third = +0.11R per setup, p = 0.238
+  judge        group  setups  win_rate  avg_R
+placebo bottom third    1085     0.038 -0.096
+placebo middle third    1081     0.050  0.089
+placebo    top third    1083     0.049  0.010
+A model with real skill has a clearly positive gap with p below 0.05,
+and the placebo does not.
+
+What the last model paid most attention to: retrace_needed_atr (188), cost_R (154), vol_regime (141), leg_atr (139), pd_pos (138), room_R (125), displacement_atr (124), hour_cos (113)
+
+==============================================================================
+6. ACCOUNT SIMULATION WITH THE RISK GUARD
+==============================================================================
+Risk per trade 0.5% | max daily loss 2.0% | max open 1
+all      : 1196 orders, result -9.3% of starting balance, worst drawdown 88.6%, blocked by guard {'daily_loss': 3, 'too_many_open': 2050}
+model    : 687 orders, result +43.5% of starting balance, worst drawdown 41.6%, blocked by guard {'daily_loss': 0, 'too_many_open': 681}
+placebo  : 688 orders, result -52.5% of starting balance, worst drawdown 86.0%, blocked by guard {'daily_loss': 1, 'too_many_open': 591}
+
+==============================================================================
+7. VERDICT
+==============================================================================
+A. DO THE SETUPS THEMSELVES HAVE AN EDGE? (every setup, test periods only)
+   93 wins in 2046 filled trades = 4.5% vs 4.8% on a random walk; average +0.00R per order.
+   Chance of doing this well on a pure random walk: p = 0.691
+   -> NOT SHOWN. This is within what a random walk produces by luck.
+   (The random-walk rate is exact for V75-style indices. On real markets, which
+   can trend, treat it as a rough yardstick.)
+
+B. DOES THE MODEL PICK THE BETTER SETUPS?
+   [ ] the setups it chose beat the random-walk win rate beyond luck (p = 0.308, need < 0.01)
+   [ ] its top third of setups beats its bottom third, beyond luck (p < 0.05)
+   [x] it ranks better than the placebo model trained on shuffled results
+   [x] the setups it chose made money out of sample
+   [x] profitable in most test periods (3/5)
+   -> NOT SHOWN. Its choices are not clearly better than taking every setup.
+
+SUMMARY: NO RELIABLE EDGE FOUND. Do not trade this with real money.
+
+Losing streaks to expect at the raw 20R win rate over 1,000 trades: typically 88 in a row, 126 in a bad case.
+Finished in 9s. Files are in outputs/real_GBPJPY_nobias/

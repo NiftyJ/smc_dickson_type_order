@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+outputs/*
+!outputs/.keep
+live/
+experiments/
+experiments_old_*/
+review/
+data/*.csv
+!data/example_mt5_export.csv
