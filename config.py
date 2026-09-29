@@ -59,6 +59,15 @@ REENTRY_MAX_SHOTS = 3          # trades per setup in total (journal: "max 3 trie
 REENTRY_WINDOW_BARS = 96       # look for that break for up to 96 bars after the stop (1 day on M15)
 REENTRY_ENTRY = "order_block"  # "order_block": limit order at the new order block (same as the first entry)
                                # "break": enter at the close of the break candle (always fills, wider stop)
+# ---------------------------------------------------------------- Wyckoff ranges (wyckoff/)
+# Starter labels found with hindsight (wyckoff/ranges.py); you correct them on the labelling page.
+RANGE_TF = "4h"                # timeframe the ranges are drawn on
+RANGE_MIN_BARS = 48            # at least 48 candles (8 days on H4)
+RANGE_MAX_WIDTH_ATR = 4.0      # band at most 4 ATRs tall (wicks may poke out)
+RANGE_TOUCHES = 2              # visits to the top zone AND to the bottom zone
+RANGE_EDGE_ZONE = 0.25         # top/bottom zone = 25% of the band
+RANGE_WICK_QUANTILE = 0.05     # band = 5th percentile of lows to 95th percentile of highs
+
 # ---------------------------------------------------------------- journal locks
 # Range lock (journal: "after 3 successive losing days on a symbol apply 15 day lock",
 # "15-20 day range, condition is 3 losing days in a 10 day range", "wait for top or bottom to break")

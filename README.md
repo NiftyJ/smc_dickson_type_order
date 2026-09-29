@@ -485,6 +485,58 @@ that market, however convincing individual 20R winners look.
 
 ---
 
+## Wyckoff range detection (`wyckoff/`)
+
+Your journal names ranges as the main killer. This folder is a computer-vision model that
+looks at the chart and marks, candle by candle, whether price is in a range, plus the
+tools to teach it what YOU call a range. No public model detects Wyckoff ranges (the
+chart-pattern models on Hugging Face do head and shoulders, triangles and similar), so it
+learns from boxes you draw.
+
+**1. Starter boxes.** `python -m wyckoff.autolabel --data "data/V75_M15.csv"` finds ranges on
+H4 with hindsight (at least 8 days, at most 4 ATRs tall, touching the top and the bottom
+twice) and writes `starter_ranges.json`. The settings are `RANGE_*` in `config.py`.
+
+**2. Your labels.** Open `wyckoff/label_tool.html` in a browser (it runs on your computer;
+nothing is uploaded). Load your CSV and the starter boxes. Fix, delete or draw boxes; press
+"Checked up to right edge" as you go; export `my_ranges.json`. Only the part you checked is
+used for training.
+
+![The labelling page with a starter box on gold, May 2014](docs/label_tool.png)
+
+**3. Train and test.** `python -m wyckoff.train --data "data/V75_M15.csv" --labels my_ranges.json`
+(on your PC in minutes, or on a RunPod GPU with `bash wyckoff/runpod.sh <csv> <labels>`).
+It trains on the first 60% of history and reports only on the next 20%:
+- how well it answers "are we in a range right now?", next to a simple rule that only uses
+  closed candles (`range_now` in `wyckoff/ranges.py`)
+- whether SMC setups taken while it says "range" do worse than the others
+
+![Model output on gold: candles above, the model's range probability below](docs/range_model_example.png)
+
+**What I found with the starter boxes** (no labels of yours yet; test periods only):
+
+| | "In a range now?" score (0.5 = guessing) | Right when it flags a range (simple rule) | SMC setups it flags vs the rest |
+|---|---|---|---|
+| Gold, 8 epochs | 0.63 | 53% (80%) | flagged: 0 winners in 40; others 6 in 63 (p = 0.015) |
+| Gold, same data, 6 epochs | 0.54 | 43% (80%) | no difference (p = 0.74) |
+| USDJPY | 0.54 | 43% (83%) | worse, not beyond luck (p = 0.09–0.44) |
+| GBPJPY | 0.70 | 54% (88%) | worse, not beyond luck (p = 0.12–0.27) |
+| EURUSD | 0.57 | 9% (93%) | worse, not beyond luck (p = 0.28–0.33) |
+| Random prices | 0.45 | 3% (80%) | no difference (p = 0.81–0.95) |
+
+- **This first model isn't good enough yet.** It sees ranges only a little better than guessing,
+  it's far less precise than the simple rule, and it memorises its training charts.
+- **Its good gold result wasn't stable.** Retraining for 6 epochs instead of 8 made it
+  disappear, so it was luck.
+- **Ranges look deadly in hindsight, but that's circular.** Trades inside hindsight boxes lost
+  far more, on random prices too, because a box is only a box if the breakout never came.
+  Judged only from closed candles, trades in ranges weren't reliably worse.
+- **What can change this:** your own labels (it currently learns my definition), more data
+  (all your symbols, M5), and a bigger model on a RunPod GPU. The test at the end of
+  `wyckoff.train` will say whether it then separates good setups from bad ones.
+
+---
+
 ## The loss-review loop (`iterate.py`)
 
 This is the "run it, look at the losses, change the code" loop, with the guardrails
@@ -666,6 +718,10 @@ smcml/plot_trades.py   pictures of trades, to check the setups look right
 smcml/reentry.py       the one re-entry after a stop-out
 smcml/risk.py          risk guard, account simulation, losing-streak maths
 smcml/live.py          the running version's Engine, paper broker, and live/replay signals
+wyckoff/ranges.py      starter range boxes (hindsight) and the simple "range right now" rule
+wyckoff/label_tool.html  labelling page: draw / fix range boxes on your chart, export JSON
+wyckoff/model.py       the range model (chart picture -> range probability per candle)
+wyckoff/train.py       train and test it; wyckoff/autolabel.py, wyckoff/runpod.sh
 tests/                 no-lookahead tests, must-always-be-true checks, replay = backtest,
                        and the MT5 code against a pretend terminal (fake_mt5.py)
 data/                  put your MT5 exports here
