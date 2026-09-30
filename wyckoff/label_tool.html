@@ -26,7 +26,7 @@
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { color: var(--muted); margin: 0; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; }
-  .bar label { color: var(--muted); font-size: 13px; }
+  .bar label:not(.file) { color: var(--muted); font-size: 13px; }
   button, select, .file { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line);
     background: var(--panel); color: var(--ink); cursor: pointer; }
   button.primary { background: var(--mine); border-color: var(--mine); color: #1f2328; font-weight: 600; }
@@ -48,8 +48,8 @@
 </header>
 
 <div class="bar">
-  <span class="file">Load price CSV (MT5 export)<input type="file" id="csv" accept=".csv,.txt"></span>
-  <span class="file">Load starter boxes (JSON)<input type="file" id="boxes" accept=".json"></span>
+  <label class="file">Load price CSV (MT5 export)<input type="file" id="csv" accept=".csv,.txt"></label>
+  <label class="file">Load starter boxes (JSON)<input type="file" id="boxes" accept=".json"></label>
   <label>Timeframe
     <select id="tf"><option value="60">H1</option><option value="240" selected>H4</option><option value="1440">D1</option></select>
   </label>
