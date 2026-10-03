@@ -93,7 +93,12 @@ COST_ATR = 0.03
 COST_PRICE = 0.0
 
 # ---------------------------------------------------------------- model and testing
-MODEL = "gbm"                  # "gbm" (gradient boosted trees, start here) or "cnn" (needs PyTorch)
+MODEL = "gbm"                  # "gbm" (gradient boosted trees, start here), "cnn" (small, needs PyTorch)
+                               # or "cnn_deep" (ResNet-18-style, 17 conv layers; wants a GPU and thousands of setups)
+CNN_DEEP_WIDTH = 32            # channels in the first stage of "cnn_deep" (they double each stage: 32-64-128-256,
+                               # 2.8 million weights). 16 = four times smaller and about three times faster.
+RANGE_FEATURES = False         # True = also give the model the three range types (wyckoff/range_types.py):
+                               # pause / directionless / staircase, on the entry chart and on H1
 N_FOLDS = 5                    # walk-forward: the test period is split into 5 chunks
 VALID_FRACTION = 0.3           # last 30% of each training period is used to pick the threshold
 MIN_TRADES_FOR_THRESHOLD = 30  # never pick a threshold that is based on fewer trades than this

@@ -537,6 +537,52 @@ It trains on the first 60% of history and reports only on the next 20%:
 
 ---
 
+## Three range types, and a deeper CNN
+
+`wyckoff/range_types.py` flags three kinds of range from closed candles only (the top of the
+file explains each rule; every threshold is in its `Settings`):
+
+| Flag | What it is |
+|---|---|
+| `pause` | a spike of 6+ ATRs, then sideways in its upper half until the high breaks. `pause_liq` is the resting low under it, `pause_swept` turns 1 once that low is taken |
+| `wyckoff` | a narrow box crossed edge to edge 4+ times; frozen until a candle closes outside it |
+| `staircase` | small new highs, each followed by a deep pullback, twice in a row |
+
+```
+python run_all.py --data "data/V75_M15.csv" --range-features                      trees + range features
+python run_all.py --data "data/V75_M15.csv" --range-features --model cnn          the small CNN (3 layers)
+python run_all.py --data "data/V75_M15.csv" --range-features --model cnn_deep     ResNet-18-style (17 layers)
+```
+
+`--range-features` gives the take/skip model 14 extra columns (the three flags, the takeout, the
+age of the range, where the entry sits in the box and how tall the box is, on the entry chart
+and on H1). `cnn_deep` has 2.8 million weights at `CNN_DEEP_WIDTH = 32`: run it on a GPU, and
+with `--no-bias-filter` so it has thousands of setups to learn from.
+
+**What I found** (real M15 data 2012-2022, walk-forward test periods, 25R target, lockbox untouched):
+
+| Total R in the test periods | Gold | EURUSD | USDJPY | GBPJPY |
+|---|---|---|---|---|
+| Every setup (D1/H4/H1 filter on) | -73.8 | -116.2 | -88.9 | -84.9 |
+| Trees | -20.4 | -1.4 | -81.0 | -13.3 |
+| Trees + range features | -7.1 | -28.7 | -65.1 | -25.8 |
+| Small CNN + range features | -23.1 | -135.9 | not run | not run |
+| Deep CNN (width 16) + range features | -33.7 | -93.2 | not run | not run |
+| Filter off: trees | -33.0 | -211.9 | +26.1 | +134.6 |
+| Filter off: trees + range features | +7.1 | -39.0 | +38.9 | -5.0 |
+
+- **No model ranked setups better than luck.** The top-third-vs-bottom-third test gave p between
+  0.12 and 0.98 in all 20 runs, and the placebo models did about as well.
+- **The range features helped on two markets and hurt on two** with the filter on, and helped on
+  three and hurt on one with it off. That is what noise looks like.
+- **The deep CNN was no better than the small one**: worse on gold, less bad on EURUSD, where both
+  picked no winner at all.
+- **Depth is not what limits the model. Examples are.** With the D1/H4/H1 filter on there are about
+  600 setups per market and only 7 to 13 of them reached 25R. No network can learn a pattern from
+  10 examples. With the filter off there are about 3,800 setups and 59 to 83 winners.
+
+---
+
 ## The loss-review loop (`iterate.py`)
 
 This is the "run it, look at the losses, change the code" loop, with the guardrails
@@ -675,7 +721,8 @@ same exam: same setups, same walk-forward, same placebo and lockbox.
 | `COOLDOWN`, `COOLDOWN_TRIGGER`, `COOLDOWN_LOSING_DAYS`, `COOLDOWN_WINDOW_DAYS`, `COOLDOWN_AFTER_STOPS`, `COOLDOWN_DAYS`, `COOLDOWN_ENDS_ON_BREAKOUT` | the range lock (journal: 3 losing days in 10 = 15-day lock, or until the range breaks) |
 | `LOSS_BLOCK_COUNT`, `LOSS_BLOCK_WINDOW_HOURS`, `LOSS_BLOCK_HOURS` | journal: 3 losses within 24h = no orders for 24h (0 = off) |
 | `MAX_ORDERS_PER_24H` | journal: at most 5 orders in any 24 hours (0 = off) |
-| `MODEL` | `"gbm"` (start here) or `"cnn"` (needs PyTorch, takes a few minutes) |
+| `MODEL` | `"gbm"` (start here), `"cnn"` (needs PyTorch, takes a few minutes) or `"cnn_deep"` (17 layers, wants a GPU) |
+| `CNN_DEEP_WIDTH`, `RANGE_FEATURES` | size of the deep CNN; whether the model also gets the three range types |
 | `RISK_PER_TRADE_PCT`, `MAX_DAILY_LOSS_PCT`, `MAX_OPEN_TRADES` | the risk guard |
 | `LOCKBOX_FRACTION` | share of history kept for the one-time final exam |
 | `DEV_FRACTION` | share of history the loss-review loop lets you study (the next 20% scores your changes) |
@@ -711,7 +758,7 @@ smcml/setups.py        state machine + features
 smcml/labels.py        outcome of every setup (fill, stop/target, costs)
 smcml/rule_votes.py    your rules as votes + rule report
 smcml/chart_images.py  chart pictures for the CNN
-smcml/model.py         gradient-boosted trees, CNN with focal loss
+smcml/model.py         gradient-boosted trees, small CNN and deep (ResNet-style) CNN with focal loss
 smcml/walkforward.py   walk-forward exam, placebo, ranking test
 smcml/my_calls.py      blind review of your own calls
 smcml/plot_trades.py   pictures of trades, to check the setups look right
@@ -719,6 +766,7 @@ smcml/reentry.py       the one re-entry after a stop-out
 smcml/risk.py          risk guard, account simulation, losing-streak maths
 smcml/live.py          the running version's Engine, paper broker, and live/replay signals
 wyckoff/ranges.py      starter range boxes (hindsight) and the simple "range right now" rule
+wyckoff/range_types.py three range types from closed candles (pause, directionless, staircase) + model features
 wyckoff/label_tool.html  labelling page: draw / fix range boxes on your chart, export JSON
 wyckoff/model.py       the range model (chart picture -> range probability per candle)
 wyckoff/train.py       train and test it; wyckoff/autolabel.py, wyckoff/runpod.sh

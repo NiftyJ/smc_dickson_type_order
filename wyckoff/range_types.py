@@ -43,7 +43,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from smcml.bias import resample
+from smcml.bias import resample, bar_length
 from smcml.detectors import atr, mirror, find_fvgs, SwingTracker
 
 
@@ -265,3 +265,55 @@ def range_types(df, tf=None, settings=None):
     out["wyckoff"], out["wyckoff_top"], out["wyckoff_bottom"] = wf, wt, wb
     out["in_range"] = (out[["pause", "wyckoff", "staircase"]].sum(axis=1) > 0).astype(np.int8)
     return out
+
+
+# ----------------------------------------------------------------------------- features for the model
+# The same seven measurements on the entry chart (_e) and on H1 candles (_h1). Shorts are
+# described on the flipped chart, like every other feature: "with" = in the trade's direction.
+RANGE_FEATURES = [f"rg_{k}_{tf}" for tf in ("e", "h1")
+                  for k in ("pause", "swept", "wyckoff", "stair", "age", "box_pos", "box_atr")]
+#   rg_pause    +1 = inside a pause whose impulse points WITH the trade, -1 = against, 0 = no pause
+#   rg_swept    1 = that pause has already had its liquidity takeout
+#   rg_wyckoff  1 = inside a directionless box
+#   rg_stair    +1 = inside a staircase that steps WITH the trade, -1 = against, 0 = none
+#   rg_age      candles since any of the three flags came on (0 = not in a range)
+#   rg_box_pos  where the entry sits in the box: 0 = the edge behind the trade, 1 = the edge ahead
+#   rg_box_atr  height of the box in ATRs
+
+
+def range_features(cands, df, settings=None, htf="1h"):
+    """One row of RANGE_FEATURES per candidate, using only what was known at the close of
+    its placement candle (for H1: the last H1 candle that had closed by then)."""
+    from wyckoff.ranges import value_at_decision
+    s = settings or Settings()
+    tp = cands["t_place"].to_numpy(dtype=int)
+    d = cands["direction"].to_numpy(dtype=float)
+    entry = cands["entry"].to_numpy(dtype=float)
+    h, l, c = (df[k].to_numpy(float) for k in ("high", "low", "close"))
+    a = atr(h, l, c, s.ATR_N)[tp]
+    times, base = df.index[tp], bar_length(df.index)
+    out = pd.DataFrame(index=cands.index)
+    for sfx, tf in (("e", None), ("h1", htf)):
+        r = range_types(df, tf=tf, settings=s)
+        on = r["in_range"]
+        r["age"] = on.groupby((on == 0).cumsum()).cumsum()
+        for edge in ("top", "bottom"):                       # one box: directionless first, then pause, then staircase
+            r[edge] = r[f"wyckoff_{edge}"].where(r["wyckoff"] == 1,
+                                                 r[f"pause_{edge}"].where(r["pause"] == 1, r[f"staircase_{edge}"]))
+
+        def at(col):
+            if tf is None:
+                return r[col].to_numpy(dtype=float)[tp]
+            return np.asarray(value_at_decision(r[col], times, base, tf), dtype=float)
+
+        top, bot = at("top"), at("bottom")
+        height = np.where(top > bot, top - bot, np.nan)
+        pos = np.where(d > 0, (entry - bot) / height, (top - entry) / height)
+        out[f"rg_pause_{sfx}"] = at("pause_dir") * d
+        out[f"rg_swept_{sfx}"] = at("pause_swept")
+        out[f"rg_wyckoff_{sfx}"] = at("wyckoff")
+        out[f"rg_stair_{sfx}"] = at("staircase_dir") * d
+        out[f"rg_age_{sfx}"] = at("age")
+        out[f"rg_box_pos_{sfx}"] = np.clip(pos, -2.0, 3.0)
+        out[f"rg_box_atr_{sfx}"] = height / a
+    return out[RANGE_FEATURES]

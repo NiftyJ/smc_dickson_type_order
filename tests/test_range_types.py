@@ -12,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from smcml.data import simulate  # noqa: E402
-from wyckoff.range_types import range_types  # noqa: E402
+from wyckoff.range_types import range_types, range_features, RANGE_FEATURES  # noqa: E402
 
 DF = simulate(6_000, mode="random", seed=11)
 FULL = range_types(DF)
@@ -126,3 +126,29 @@ def test_a_clean_trend_is_not_a_staircase():
         path += list(up) + list(dn)
     r = range_types(bars(np.r_[base, path[1:]], wick=0.1))
     assert r["staircase"].iloc[len(base):].sum() == 0
+
+
+def test_model_features_use_only_closed_candles():
+    cands = pd.DataFrame({"t_place": [900, 2500, 2501, 4000, 5200, 5990],
+                          "direction": [1, -1, 1, 1, -1, 1]})
+    cands["entry"] = DF["close"].to_numpy()[cands["t_place"]]
+    full = range_features(cands, DF)
+    assert list(full.columns) == RANGE_FEATURES
+    assert full.filter(like="rg_age").ge(0).all().all()
+    for T in (2600, 4001, 5500):                                        # cut the data right after some of them
+        keep = cands[cands["t_place"] < T]
+        part = range_features(keep, DF.iloc[:T])
+        pd.testing.assert_frame_equal(part, full.loc[keep.index])
+
+
+def test_deep_cnn_trains_and_scores():
+    import pytest
+    pytest.importorskip("torch")
+    from smcml.model import DeepCNNModel
+    rng = np.random.default_rng(0)
+    img = (rng.random((40, 2, 48, 144)) > 0.9).astype(np.uint8) * 255
+    X, y = rng.normal(size=(40, 6)).astype(np.float32), (np.arange(40) % 4 == 0).astype(int)
+    m = DeepCNNModel(epochs=1, width=8).fit(X, y, img)
+    assert sum(k.__class__.__name__ == "Conv2d" and k.kernel_size != (1, 1) for k in m.net.modules()) == 17
+    s = m.score(X, img)
+    assert s.shape == (40,) and np.isfinite(s).all() and ((s >= 0) & (s <= 1)).all()

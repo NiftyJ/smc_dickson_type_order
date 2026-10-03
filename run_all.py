@@ -60,7 +60,9 @@ def main():
     ap.add_argument("--sim", default=cfg.SIM_MODE, choices=["random", "planted"])
     ap.add_argument("--bars", type=int, default=cfg.SIM_BARS)
     ap.add_argument("--seed", type=int, default=cfg.SIM_SEED)
-    ap.add_argument("--model", default=cfg.MODEL, choices=["gbm", "cnn"])
+    ap.add_argument("--model", default=cfg.MODEL, choices=["gbm", "cnn", "cnn_deep"])
+    ap.add_argument("--range-features", action="store_true",
+                    help="also give the model the three range types (pause, directionless, staircase)")
     ap.add_argument("--export-review", type=int, default=0, metavar="N")
     ap.add_argument("--my-calls", default=None, metavar="CSV")
     ap.add_argument("--pretend-calls", action="store_true")
@@ -74,6 +76,8 @@ def main():
                     help="save pictures of N trades taken by the 'every setup' judge")
     args = ap.parse_args()
     cfg.MODEL = args.model
+    if args.range_features:
+        cfg.RANGE_FEATURES = True
     if args.no_bias_filter:
         cfg.BIAS_FILTER = False
     if args.cost is not None:
@@ -114,6 +118,10 @@ def main():
         return
     lab_all = label(cands, df, cfg)
     lab_all = pd.concat([lab_all, votes(lab_all, cfg)], axis=1)
+    range_cols = []
+    if getattr(cfg, "RANGE_FEATURES", False):
+        from wyckoff.range_types import range_features, RANGE_FEATURES as range_cols
+        lab_all = pd.concat([lab_all, range_features(lab_all, df)], axis=1)
     # Everything except the final exam only sees setups that finished before the lockbox.
     lab = lab_all[lab_all["t_exit"] < lock_bar].copy() if cfg.LOCKBOX_FRACTION > 0 else lab_all
     lab.to_csv(os.path.join(out_dir, "candidates.csv"), index=False)
@@ -173,9 +181,9 @@ def main():
     else:
         rep.h(f"5. WALK-FORWARD EXAM ({cfg.N_FOLDS} test periods, model = {cfg.MODEL})")
         exam_set, test_from = done, None
-    feature_cols = feature_columns(cfg) + [c for c in lab.columns if c.startswith("vote_")]
+    feature_cols = feature_columns(cfg) + [c for c in lab.columns if c.startswith("vote_")] + list(range_cols)
     images = None
-    if cfg.MODEL == "cnn":
+    if cfg.MODEL in ("cnn", "cnn_deep"):
         from smcml.chart_images import images_for
         images = images_for(exam_set.sort_values(["t_place", "direction"], kind="stable").reset_index(drop=True), df)
     res = walk_forward(exam_set, cfg, feature_cols, images=images, my_calls=calls, seed=args.seed,

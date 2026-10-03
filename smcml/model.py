@@ -17,7 +17,14 @@ Two options (choose with MODEL in config.py):
          same shape as your problem: about 1 setup in 20 is a 20R winner.
          Needs PyTorch. Only worth trying once "gbm" works.
 
-Both have the same two methods: fit(X, y, images) and score(X, images).
+  "cnn_deep"  The same idea with a much deeper network: a ResNet-18-style stack
+         (He et al., 2016) of 17 convolution layers with skip connections, against 3
+         layers in "cnn". Skip connections are what let a deep network train at all.
+         A deep network has millions of adjustable numbers, so it needs THOUSANDS of
+         setups; on a few hundred it memorises its training charts. Train it on a GPU
+         (RunPod); on a laptop CPU it is slow. Size: CNN_DEEP_WIDTH in config.py.
+
+All have the same two methods: fit(X, y, images) and score(X, images).
 """
 import numpy as np
 
@@ -93,25 +100,13 @@ class CNNModel:
             raise ImportError("MODEL='cnn' needs PyTorch: pip install torch") from e
         self.seed, self.epochs, self.lr, self.gamma, self.alpha, self.batch = seed, epochs, lr, gamma, alpha, batch
 
-    def _tab(self, X):
-        Z = (np.asarray(X, dtype=np.float32) - self.mu) / self.sd
-        return np.nan_to_num(Z, nan=0.0, posinf=0.0, neginf=0.0)
-
-    def fit(self, X, y, images):
+    def _build(self, n_tab):
+        """The network: picture -> convolutions -> joined with the feature table -> one score."""
         import torch
         import torch.nn as nn
-        torch.manual_seed(self.seed)
-        rng = np.random.default_rng(self.seed)
-        Xa = np.asarray(X, dtype=np.float32)
-        self.mu = np.nanmean(Xa, axis=0)
-        self.sd = np.nanstd(Xa, axis=0) + 1e-6
-        self.mu = np.nan_to_num(self.mu)
-        tab = torch.tensor(self._tab(Xa))
-        img = torch.tensor(images, dtype=torch.float32) / 255.0
-        yt = torch.tensor(np.asarray(y, dtype=np.float32))
 
         class Net(nn.Module):
-            def __init__(self, n_tab):
+            def __init__(self):
                 super().__init__()
                 self.conv = nn.Sequential(
                     nn.Conv2d(2, 16, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
@@ -123,7 +118,25 @@ class CNNModel:
             def forward(self, im, tb):
                 return self.head(torch.cat([self.conv(im).flatten(1), tb], 1)).squeeze(1)
 
-        self.net = Net(tab.shape[1])
+        return Net()
+
+    def _tab(self, X):
+        Z = (np.asarray(X, dtype=np.float32) - self.mu) / self.sd
+        return np.nan_to_num(Z, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def fit(self, X, y, images):
+        import torch
+        torch.manual_seed(self.seed)
+        rng = np.random.default_rng(self.seed)
+        Xa = np.asarray(X, dtype=np.float32)
+        self.mu = np.nanmean(Xa, axis=0)
+        self.sd = np.nanstd(Xa, axis=0) + 1e-6
+        self.mu = np.nan_to_num(self.mu)
+        tab = torch.tensor(self._tab(Xa))
+        img = torch.tensor(images, dtype=torch.float32) / 255.0
+        yt = torch.tensor(np.asarray(y, dtype=np.float32))
+
+        self.net = self._build(tab.shape[1])
         opt = torch.optim.Adam(self.net.parameters(), lr=self.lr, weight_decay=1e-4)
         n = len(yt)
         self.net.train()
@@ -131,6 +144,8 @@ class CNNModel:
             order = rng.permutation(n)
             for s in range(0, n, self.batch):
                 b = torch.tensor(order[s:s + self.batch])
+                if len(b) < 2:                               # batch-norm cannot train on a single picture
+                    continue
                 loss = focal_loss(self.net(img[b], tab[b]), yt[b], self.gamma, self.alpha)
                 opt.zero_grad()
                 loss.backward()
@@ -146,9 +161,58 @@ class CNNModel:
             return torch.sigmoid(self.net(img, tab)).numpy()
 
 
+class DeepCNNModel(CNNModel):
+    """ResNet-18-style network: 1 + 4 stages x 2 blocks x 2 = 17 convolution layers."""
+
+    def __init__(self, seed=0, width=32, blocks=2, **kw):
+        super().__init__(seed, **kw)
+        self.width, self.blocks = width, blocks
+
+    def _build(self, n_tab):
+        import torch
+        import torch.nn as nn
+        w, blocks = self.width, self.blocks
+
+        class Block(nn.Module):
+            """Two 3x3 convolutions plus a skip connection: output = input + what the block learned."""
+            def __init__(self, cin, cout, stride):
+                super().__init__()
+                self.body = nn.Sequential(
+                    nn.Conv2d(cin, cout, 3, stride, 1, bias=False), nn.BatchNorm2d(cout), nn.ReLU(),
+                    nn.Conv2d(cout, cout, 3, 1, 1, bias=False), nn.BatchNorm2d(cout))
+                self.skip = (nn.Identity() if stride == 1 and cin == cout else
+                             nn.Sequential(nn.Conv2d(cin, cout, 1, stride, bias=False), nn.BatchNorm2d(cout)))
+
+            def forward(self, x):
+                return torch.relu(self.body(x) + self.skip(x))
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # every candle is 3 pixels wide (open tick, high-low line, close tick): the first
+                # layer reads one whole candle at a time and steps candle by candle
+                layers = [nn.Conv2d(2, w, (5, 3), (1, 3), (2, 0), bias=False), nn.BatchNorm2d(w), nn.ReLU()]
+                cin = w
+                for stage, cout in enumerate((w, 2 * w, 4 * w, 8 * w)):
+                    for k in range(blocks):
+                        layers.append(Block(cin, cout, 2 if (k == 0 and stage > 0) else 1))
+                        cin = cout
+                layers.append(nn.AdaptiveAvgPool2d(1))
+                self.conv = nn.Sequential(*layers)
+                self.head = nn.Sequential(nn.Linear(cin + n_tab, 64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64, 1))
+
+            def forward(self, im, tb):
+                return self.head(torch.cat([self.conv(im).flatten(1), tb], 1)).squeeze(1)
+
+        return Net()
+
+
 def make_model(kind, seed=0):
     if kind == "gbm":
         return TreeModel(seed)
     if kind == "cnn":
         return CNNModel(seed)
-    raise ValueError("MODEL must be 'gbm' or 'cnn'")
+    if kind == "cnn_deep":
+        import config as cfg
+        return DeepCNNModel(seed, width=getattr(cfg, "CNN_DEEP_WIDTH", 32))
+    raise ValueError("MODEL must be 'gbm', 'cnn' or 'cnn_deep'")
