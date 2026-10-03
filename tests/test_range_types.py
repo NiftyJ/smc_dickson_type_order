@@ -1,0 +1,106 @@
+"""
+Checks for the three range types (wyckoff/range_types.py).
+
+  * nothing uses candles after the one being judged
+  * a drawn example of each picture switches on its own flag, and the break switches it off
+"""
+import os
+import sys
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from smcml.data import simulate  # noqa: E402
+from wyckoff.range_types import range_types  # noqa: E402
+
+DF = simulate(6_000, mode="random", seed=11)
+FULL = range_types(DF)
+
+
+def bars(closes, wick=0.3):
+    """Candles from a list of closes: open = previous close, small wicks."""
+    c = np.asarray(closes, float)
+    o = np.r_[c[0], c[:-1]]
+    idx = pd.date_range("2024-01-01", periods=len(c), freq="5min", name="time")
+    return pd.DataFrame({"open": o, "high": np.maximum(o, c) + wick, "low": np.minimum(o, c) - wick, "close": c}, index=idx)
+
+
+def quiet(n, level=100.0, seed=0):
+    return level + np.random.default_rng(seed).normal(0, 0.4, n).cumsum() * 0.2
+
+
+def test_only_closed_candles_are_used():
+    rng = np.random.default_rng(0)
+    for t in rng.choice(np.arange(500, len(DF) - 5), 8, replace=False):
+        part = range_types(DF.iloc[:t + 1])
+        pd.testing.assert_series_equal(part.iloc[-1], FULL.iloc[t], check_names=False)
+
+
+def test_flags_fire_on_random_prices_but_not_all_the_time():
+    for k in ("pause", "wyckoff", "staircase"):
+        assert 0 < FULL[k].mean() < 0.6, k
+    on = FULL[FULL["wyckoff"] == 1]
+    assert (on["wyckoff_top"] > on["wyckoff_bottom"]).all()
+
+
+def test_picture_1_pause_after_an_impulse():
+    base = quiet(60)
+    spike = base[-1] + np.array([2.5, 5.0, 7.5, 9.0])                  # 4 big candles up, gaps between them
+    top = spike[-1]
+    pause = top - np.array([1.0, 2.0, 1.2, 2.5, 1.5, 2.2, 1.0, 2.4, 1.3, 2.0, 1.1, 1.8])
+    cont = top + np.array([1.5, 3.0, 4.5])                              # break of the pause high
+    r = range_types(bars(np.r_[base, spike, pause, cont]))
+    p0 = len(base) + len(spike)
+    assert r["pause"].iloc[p0 + 5:p0 + len(pause)].all()               # on from the 5th sideways candle
+    assert (r["pause_dir"].iloc[p0 + 5:p0 + len(pause)] == 1).all()
+    assert r["pause"].iloc[:p0].sum() == 0                              # not before the spike ended
+    assert r["pause"].iloc[p0 + len(pause)] == 0                        # off on the break
+
+
+def test_picture_1_is_cancelled_when_the_spike_is_given_back():
+    base = quiet(60)
+    spike = base[-1] + np.array([2.5, 5.0, 7.5, 9.0])
+    fail = spike[-1] - np.array([1.0, 2.0, 3.5, 5.0, 7.0, 8.0, 8.5, 8.0, 8.5, 8.2])
+    r = range_types(bars(np.r_[base, spike, fail]))
+    assert r["pause"].iloc[len(base) + len(spike) + 4:].sum() == 0
+
+
+def test_picture_2_directionless_range_stays_on_until_a_close_outside():
+    base = quiet(40)
+    lvl = base[-1]
+    wave = lvl + 1.6 * np.sin(np.arange(70) * 2 * np.pi / 14)           # up and down between two edges
+    out = lvl + np.array([3.5, 5.0, 6.5, 8.0])                          # closes far above the box
+    r = range_types(bars(np.r_[base, wave, out]))
+    w0, w1 = len(base), len(base) + len(wave)
+    assert r["wyckoff"].iloc[w1 - 10:w1].all()
+    assert r["wyckoff"].iloc[w1 + 1:].sum() == 0
+    assert r["wyckoff"].iloc[:w0 + 20].sum() == 0                       # needs enough candles first
+
+
+def test_picture_3_staircase():
+    base = quiet(40)
+    lvl = base[-1]
+    path = [lvl]
+    for k in range(5):                                                  # up 6, back 4.5: each new high adds 1.5
+        up = np.linspace(path[-1], path[-1] + 6, 7)[1:]
+        dn = np.linspace(up[-1], up[-1] - 4.5, 7)[1:]
+        path += list(up) + list(dn)
+    brk = path[-1] + np.array([4.0, 8.0, 12.0, 16.0])                   # a real displacement out of it
+    r = range_types(bars(np.r_[base, path[1:], brk], wick=0.1))
+    s0, s1 = len(base), len(base) + len(path) - 1
+    assert r["staircase"].iloc[s0:s1].sum() > 10
+    assert (r["staircase_dir"][r["staircase"] == 1] == 1).all()
+    assert r["staircase"].iloc[s0:s0 + 24].sum() == 0                   # needs 2 full cycles first
+    assert r["staircase"].iloc[-2:].sum() == 0                          # off after the break
+
+
+def test_a_clean_trend_is_not_a_staircase():
+    base = quiet(40)
+    path = [base[-1]]
+    for k in range(5):                                                  # up 6, back 1.5: shallow pullbacks
+        up = np.linspace(path[-1], path[-1] + 6, 7)[1:]
+        dn = np.linspace(up[-1], up[-1] - 1.5, 4)[1:]
+        path += list(up) + list(dn)
+    r = range_types(bars(np.r_[base, path[1:]], wick=0.1))
+    assert r["staircase"].iloc[len(base):].sum() == 0
