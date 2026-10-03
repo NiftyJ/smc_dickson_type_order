@@ -13,6 +13,10 @@ Row t says what was known at the CLOSE of candle t. Columns (0/1 flags, plus eac
              that leg. It never closes back below PAUSE_MAX_RETRACE of the leg.
              Ends when a candle closes above the pause high (the break of structure),
              or closes below that floor (the impulse failed).
+             Liquidity: a low that HELD inside the spike or the pause (a pullback candle
+             whose low the next PAUSE_LIQ_HOLD candles stayed above) is where stops rest.
+             pause_liq is that level; pause_swept turns 1 once a pause candle trades
+             below it (the takeout). The usual order is spike, pause, takeout, break.
 
   wyckoff    the directionless range (your picture 2)
              a band at most WY_WIDTH_K x sqrt(candles) ATRs tall that price has crossed from one
@@ -30,6 +34,8 @@ Row t says what was known at the CLOSE of candle t. Columns (0/1 flags, plus eac
   in_range   1 if any of the three is on.
 
 pause_dir / staircase_dir: +1 = the impulse or the staircase points up, -1 = down.
+pause_liq: before the takeout, the nearest resting low under the pause (NaN if there is
+none yet); after it, the low that was taken. For a down pause it is a high.
 Down versions are found by flipping the chart (mirror), like everywhere else in the bot.
 """
 from dataclasses import dataclass
@@ -52,6 +58,7 @@ class Settings:
     PAUSE_MAX_RETRACE: float = 0.5    # the pause may give back at most this share of the spike (on closes)
     PAUSE_MIN_BARS: int = 5           # sideways for at least this many candles before it is called a pause
     PAUSE_MAX_BARS: int = 80          # after this long it is no longer "the pause after that spike"
+    PAUSE_LIQ_HOLD: int = 5           # a low is resting liquidity once this many candles have stayed above it
     # ---- picture 2: directionless range
     WY_LENGTHS: tuple = (30, 45, 60)  # window lengths tried, in candles
     WY_WIDTH_K: float = 0.5           # band at most WY_WIDTH_K x sqrt(length) ATRs tall. A random walk covers
@@ -70,12 +77,19 @@ class Settings:
 
 
 # ----------------------------------------------------------------------------- picture 1
+def _held_low(o, l, c, k, m):
+    """Candle k is a low that held: the next m candles all made higher lows, and k is a
+    pullback candle (a down candle, or a lower low than the candle before it).
+    Known only at the close of candle k + m."""
+    return l[k] < l[k + 1:k + m + 1].min() and (c[k] < o[k] or l[k] < l[k - 1])
+
+
 def _pause(o, h, l, c, a, a_slow, s):
-    """Up version. Returns flag, top, bottom arrays."""
+    """Up version. Returns flag, top, bottom, liquidity level, swept arrays."""
     n = len(c)
-    flag = np.zeros(n, np.int8)
-    top, bot = np.full(n, np.nan), np.full(n, np.nan)
-    live = False
+    flag, swept_out = np.zeros(n, np.int8), np.zeros(n, np.int8)
+    top, bot, liq = np.full(n, np.nan), np.full(n, np.nan), np.full(n, np.nan)
+    live, m = False, s.PAUSE_LIQ_HOLD
     for t in range(n):
         if live:
             if c[t] > hi:                                   # break of the pause high: the move continues
@@ -87,8 +101,17 @@ def _pause(o, h, l, c, a, a_slow, s):
                 if h[t] > hi:                               # a wick above without a close: the box grows
                     hi = h[t]
                 low_since = min(low_since, l[t])
+                taken = [x for x in levels if l[t] < x]     # resting lows this candle traded below
+                if taken:
+                    if not swept:
+                        swept, liq_taken = True, max(taken)  # the first one taken is the one that counts
+                    levels = [x for x in levels if l[t] >= x]
+                if t - m > leg_bar and _held_low(o, l, c, t - m, m):   # a new resting low, usable from the next candle
+                    levels.append(l[t - m])
                 if t - hi_bar >= s.PAUSE_MIN_BARS:
                     flag[t], top[t], bot[t] = 1, hi, low_since
+                    swept_out[t] = swept
+                    liq[t] = liq_taken if swept else (max(levels) if levels else np.nan)
                 continue
         # ---- is this candle the top of a fresh impulse?
         j0 = max(t - s.IMPULSE_BARS + 1, 1)
@@ -105,7 +128,10 @@ def _pause(o, h, l, c, a, a_slow, s):
         if not gaps and bodies < s.IMPULSE_BODY_ATR * ref:
             continue
         live, hi, hi_bar, leg_low, low_since = True, h[t], t, l[j], np.inf   # the box bottom = lowest low AFTER the top candle
-    return flag, top, bot
+        leg_bar, swept, liq_taken = j, False, np.nan
+        levels = [l[k] for k in range(j + 1, t - m + 1)    # lows inside the spike that held and are still untouched
+                  if _held_low(o, l, c, k, m) and l[k] < l[k + 1:t + 1].min()]
+    return flag, top, bot, liq, swept_out
 
 
 # ----------------------------------------------------------------------------- picture 2
@@ -231,6 +257,9 @@ def range_types(df, tf=None, settings=None):
         out[f"{name}_dir"] = np.where(is_up, 1, np.where(dn[0] == 1, -1, 0)).astype(np.int8)
         out[f"{name}_top"] = np.where(is_up, up[1], -dn[2])       # flipped chart: its bottom is the real top
         out[f"{name}_bottom"] = np.where(is_up, up[2], -dn[1])
+        if name == "pause":
+            out["pause_liq"] = np.where(is_up, up[3], -dn[3])
+            out["pause_swept"] = np.where(is_up, up[4], dn[4]).astype(np.int8)
 
     wf, wt, wb = _wyckoff(h, l, c, a, s)
     out["wyckoff"], out["wyckoff_top"], out["wyckoff_bottom"] = wf, wt, wb

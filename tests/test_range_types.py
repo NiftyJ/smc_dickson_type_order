@@ -58,6 +58,28 @@ def test_picture_1_pause_after_an_impulse():
     assert r["pause"].iloc[p0 + len(pause)] == 0                        # off on the break
 
 
+def test_picture_1_liquidity_takeout():
+    base = quiet(60)
+    b = base[-1]
+    spike = b + np.array([2.5, 6.0, 5.6, 8.0, 9.0])                     # one down candle inside the spike
+    pause = b + 9.0 - np.array([1.0, 1.6, 1.2, 1.8, 1.3, 1.7, 1.2, 1.6])
+    sweep = b + np.array([4.9, 7.0, 7.8])                               # trades under that candle's low, closes above the floor
+    cont = b + np.array([10.5, 12.0])
+    df = bars(np.r_[base, spike, pause, sweep, cont])
+    k = len(base) + 2
+    df.iloc[k, df.columns.get_loc("low")] -= 0.2                        # its low: the next candles stay above it, so it HELD
+    level = df["low"].iloc[k]
+    r = range_types(df)
+    p0 = len(base) + len(spike)
+    before = r.iloc[p0 + 5:p0 + len(pause)]
+    assert before["pause"].all() and (before["pause_swept"] == 0).all()
+    assert np.allclose(before["pause_liq"], level)                      # the resting low is known before it is taken
+    after = r.iloc[p0 + len(pause):p0 + len(pause) + len(sweep)]
+    assert after["pause"].all() and (after["pause_swept"] == 1).all()
+    assert np.allclose(after["pause_liq"], level)
+    assert r["pause"].iloc[p0 + len(pause) + len(sweep)] == 0           # then the break ends the pause
+
+
 def test_picture_1_is_cancelled_when_the_spike_is_given_back():
     base = quiet(60)
     spike = base[-1] + np.array([2.5, 5.0, 7.5, 9.0])
