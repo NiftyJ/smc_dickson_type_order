@@ -10,3 +10,4 @@ review/
 data/*.csv
 !data/example_mt5_export.csv
 wyckoff/range_model.pt
+data/real/
