@@ -152,3 +152,14 @@ def test_deep_cnn_trains_and_scores():
     assert sum(k.__class__.__name__ == "Conv2d" and k.kernel_size != (1, 1) for k in m.net.modules()) == 17
     s = m.score(X, img)
     assert s.shape == (40,) and np.isfinite(s).all() and ((s >= 0) & (s <= 1)).all()
+
+
+def test_range_report_writes_a_pdf_per_type(tmp_path):
+    import pytest
+    pytest.importorskip("matplotlib")
+    from wyckoff.range_report import make_report, find_episodes
+    res = make_report(DF, str(tmp_path), "test", max_each=4)
+    for kind in ("pause", "wyckoff", "staircase"):
+        assert os.path.getsize(res[kind]["path"]) > 2000
+        assert res[kind]["ranges"] == len(find_episodes(FULL, kind)) > 0   # every detected range is counted
+        assert sum(res[kind]["endings"].values()) == res[kind]["ranges"]

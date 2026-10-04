@@ -554,6 +554,10 @@ python run_all.py --data "data/V75_M15.csv" --range-features --model cnn        
 python run_all.py --data "data/V75_M15.csv" --range-features --model cnn_deep     ResNet-18-style (17 layers)
 ```
 
+To check the detector against your own eye, `python -m wyckoff.range_report --data "data/XAUUSD_M5.csv"`
+writes one PDF per range type (`outputs/range_report/<file>/pause.pdf`, `wyckoff.pdf`, `staircase.pdf`) with a
+chart of every range it found in the last 365 days (`--last-days`, `--from`/`--to`, `--tf 5min` to change that).
+
 `--range-features` gives the take/skip model 14 extra columns (the three flags, the takeout, the
 age of the range, where the entry sits in the box and how tall the box is, on the entry chart
 and on H1). `cnn_deep` has 2.8 million weights at `CNN_DEEP_WIDTH = 32`: run it on a GPU, and
@@ -767,6 +771,7 @@ smcml/risk.py          risk guard, account simulation, losing-streak maths
 smcml/live.py          the running version's Engine, paper broker, and live/replay signals
 wyckoff/ranges.py      starter range boxes (hindsight) and the simple "range right now" rule
 wyckoff/range_types.py three range types from closed candles (pause, directionless, staircase) + model features
+wyckoff/range_report.py one PDF per range type with a chart of every range the detector found
 wyckoff/label_tool.html  labelling page: draw / fix range boxes on your chart, export JSON
 wyckoff/model.py       the range model (chart picture -> range probability per candle)
 wyckoff/train.py       train and test it; wyckoff/autolabel.py, wyckoff/runpod.sh
