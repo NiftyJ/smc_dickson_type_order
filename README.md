@@ -537,6 +537,35 @@ It trains on the first 60% of history and reports only on the next 20%:
 
 ---
 
+## The new version (`smc2/`)
+
+The new version is built one indicator at a time, and the strategy comes after. The old bot
+(`smcml/`) is unchanged. Every indicator in `smc2/` follows the same rules:
+
+- Row t is what was known at the **close** of candle t.
+- One row per candle of **your** chart, even for an indicator judged on H1 or H4. Each row
+  shows the last H1/H4 candle that had already closed (`smc2/core.py`, `align`).
+- They share one set of building blocks (`smc2/core.py`: ATR, swings, FVGs, resting lows,
+  timeframes), so a word means the same thing in every indicator.
+
+**Indicator 1: range type** (`smc2/range_type.py`). Pause, Wyckoff and staircase (the three
+pictures) are now one indicator. Each kind has the same eight columns: `<kind>` (on/off),
+`_dir`, `_top`, `_bottom`, `_start`, `_liq` (resting liquidity), `_swept` (it was taken) and
+`_end` (+1 broke out up, -1 down, 0 faded). `range_type` names the range price is in now; if
+two are on, it's the one that switched on last. The detection is the same as
+`wyckoff/range_types.py`: on 2019–2022 gold (M15, H1 and H4) and on random prices, the flags,
+boxes and pause liquidity are identical.
+
+```
+from smc2.range_type import range_type
+r = range_type(df, tf="1h")         # one row per M15 candle, judged on closed H1 candles
+python -m smc2.show --data "data/V75_M15.csv" --tf 1h --start 2024-03-01   # a picture to check it
+```
+
+![Range type on gold, H1, March 2014: pause (orange), Wyckoff (blue), staircase (green)](docs/smc2_range_type_gold_h1.png)
+
+---
+
 ## The loss-review loop (`iterate.py`)
 
 This is the "run it, look at the losses, change the code" loop, with the guardrails
@@ -722,6 +751,10 @@ wyckoff/ranges.py      starter range boxes (hindsight) and the simple "range rig
 wyckoff/label_tool.html  labelling page: draw / fix range boxes on your chart, export JSON
 wyckoff/model.py       the range model (chart picture -> range probability per candle)
 wyckoff/train.py       train and test it; wyckoff/autolabel.py, wyckoff/runpod.sh
+wyckoff/range_types.py the three range types (pause, Wyckoff, staircase), first version
+smc2/core.py           the new version's shared building blocks, and higher timeframes on your chart
+smc2/range_type.py     the new version's range-type indicator (the three kinds, same columns)
+smc2/show.py           picture of the range-type indicator on your chart
 tests/                 no-lookahead tests, must-always-be-true checks, replay = backtest,
                        and the MT5 code against a pretend terminal (fake_mt5.py)
 data/                  put your MT5 exports here
